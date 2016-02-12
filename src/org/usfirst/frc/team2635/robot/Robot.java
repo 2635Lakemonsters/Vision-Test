@@ -7,6 +7,7 @@ import java.util.Vector;
 
 import org.usfirst.frc.team2635.robot.Robot.ParticleReport;
 
+import com.kauailabs.navx.frc.AHRS;
 import com.ni.vision.NIVision;
 import com.ni.vision.NIVision.ColorMode;
 import com.ni.vision.NIVision.DrawMode;
@@ -16,9 +17,14 @@ import com.ni.vision.NIVision.PointFloat;
 import com.ni.vision.NIVision.ROI;
 import com.ni.vision.NIVision.ShapeMode;
 
+import edu.wpi.first.wpilibj.CANTalon;
 import edu.wpi.first.wpilibj.CameraServer;
 import edu.wpi.first.wpilibj.IterativeRobot;
+import edu.wpi.first.wpilibj.Joystick;
+import edu.wpi.first.wpilibj.PIDController;
+import edu.wpi.first.wpilibj.RobotDrive;
 import edu.wpi.first.wpilibj.Sendable;
+import edu.wpi.first.wpilibj.SerialPort;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -38,8 +44,8 @@ public class Robot extends IterativeRobot {
      * used for any initialization code.
      */
 	public class ParticleReport implements Comparator<ParticleReport>, Comparable<ParticleReport>{
-		double HorizontalSegments;
-		double VerticalSegments;
+		double Area;
+		double AreaByImageArea;
 		double BoundingRectLeft;
 		double BoundingRectTop;
 		double BoundingRectWidth;
@@ -47,14 +53,18 @@ public class Robot extends IterativeRobot {
 		
 		public int compareTo(ParticleReport r)
 		{
-			return (int)(r.VerticalSegments - this.VerticalSegments);
+			return (int)(r.AreaByImageArea - this.AreaByImageArea);
 		}
 		
 		public int compare(ParticleReport r1, ParticleReport r2)
 		{
-			return (int)(r1.VerticalSegments - r2.VerticalSegments);
+			return (int)(r1.AreaByImageArea - r2.AreaByImageArea);
 		}
 	};
+	final int REAR_RIGHT_CHANNEL = 3;
+	final int FRONT_RIGHT_CHANNEL = 4;
+	final int REAR_LEFT_CHANNEL = 1;
+	final int FRONT_LEFT_CHANNEL = 2;
 	SendableChooser cameraView;
 	String BINARY = "binary";
 	String COLOR = "color";
@@ -62,9 +72,9 @@ public class Robot extends IterativeRobot {
     Image colorFrame;
     Image binaryFrame;
     Image overlayFrame;
-	NIVision.Range RETRO_HUE_RANGE = new NIVision.Range(0, 130);	//Default hue range for yellow tote
-	NIVision.Range RETRO_SAT_RANGE = new NIVision.Range(0, 255);	//Default saturation range for yellow tote
-	NIVision.Range RETRO_VAL_RANGE = new NIVision.Range(230, 255);	//Default value range for yellow tote
+	NIVision.Range RETRO_HUE_RANGE = new NIVision.Range(0, 5);	//Default hue range for yellow tote
+	NIVision.Range RETRO_SAT_RANGE = new NIVision.Range(0, 10);	//Default saturation range for yellow tote
+	NIVision.Range RETRO_VAL_RANGE = new NIVision.Range(250, 255);	//Default value range for yellow tote
 	double MIN_RECT_WIDTH = 0.0;
 	double MAX_RECT_WIDTH = 200.0;
 	double MIN_RECT_HEIGHT = 0.0;
@@ -81,8 +91,29 @@ public class Robot extends IterativeRobot {
 	NIVision.ParticleFilterCriteria2 criteria[] = new NIVision.ParticleFilterCriteria2[1];
 	NIVision.ParticleFilterOptions2 filterOptions = new NIVision.ParticleFilterOptions2(0,0,1,1);
 	NIVision.RangeFloat rectAngleRanges[] = {new NIVision.RangeFloat(60.0, 110.0)};
+	CANTalon rearRight;
+	CANTalon frontRight;
+	CANTalon rearLeft;
+	CANTalon frontLeft;
+	RobotDrive drive;
+    Joystick joystick;
+    PIDController pid;
+    AHRS navx;
+    AngleUnwrapper unwrapper;
+    double angleToTarget = 0.0;
     public void robotInit() {
-
+    	SmartDashboard.putNumber("P", 0);
+    	SmartDashboard.putNumber("I", 0);
+    	SmartDashboard.putNumber("D", 0);
+		rearRight = new CANTalon(REAR_RIGHT_CHANNEL);
+    	frontRight = new CANTalon(FRONT_RIGHT_CHANNEL);
+    	rearLeft = new CANTalon(REAR_LEFT_CHANNEL);
+    	frontLeft = new CANTalon(FRONT_LEFT_CHANNEL);
+		drive = new RobotDrive(frontLeft, rearLeft, frontRight, rearRight);
+    	joystick = new Joystick(0);
+    	navx = new AHRS(SerialPort.Port.kMXP);
+    	unwrapper = new AngleUnwrapper(180.0, new SensorNavxAngle(navx));
+    	pid = new PIDController(SmartDashboard.getNumber("P"), SmartDashboard.getNumber("I"), SmartDashboard.getNumber("D"),unwrapper, new PIDOutputDrive(drive));
 	    overlayFrame = NIVision.imaqCreateImage(ImageType.IMAGE_U8, 0);
 	    
         colorFrame = NIVision.imaqCreateImage(NIVision.ImageType.IMAGE_RGB, 0);
@@ -206,8 +237,8 @@ public class Robot extends IterativeRobot {
 			for(int particleIndex = 0; particleIndex < numParticles; particleIndex++)
 			{
 				ParticleReport par = new ParticleReport();
-				par.HorizontalSegments = NIVision.imaqMeasureParticle(binaryFrame, particleIndex, 0, NIVision.MeasurementType.MT_NUMBER_OF_VERT_SEGMENTS);
-				par.VerticalSegments = NIVision.imaqMeasureParticle(binaryFrame, particleIndex, 0, NIVision.MeasurementType.MT_NUMBER_OF_VERT_SEGMENTS);
+				par.Area = NIVision.imaqMeasureParticle(binaryFrame, particleIndex, 0, NIVision.MeasurementType.MT_AREA);
+				par.AreaByImageArea = NIVision.imaqMeasureParticle(binaryFrame, particleIndex, 0, NIVision.MeasurementType.MT_AREA_BY_IMAGE_AREA);
 				par.BoundingRectTop = NIVision.imaqMeasureParticle(binaryFrame, particleIndex, 0, NIVision.MeasurementType.MT_BOUNDING_RECT_TOP);
 				par.BoundingRectLeft = NIVision.imaqMeasureParticle(binaryFrame, particleIndex, 0, NIVision.MeasurementType.MT_BOUNDING_RECT_LEFT);
 				par.BoundingRectHeight = NIVision.imaqMeasureParticle(binaryFrame, particleIndex, 0, NIVision.MeasurementType.MT_BOUNDING_RECT_HEIGHT);
@@ -226,9 +257,6 @@ public class Robot extends IterativeRobot {
 //			SmartDashboard.putNumber("Area", scores.Area);
 //			boolean isTote = scores.Aspect > SCORE_MIN && scores.Area > SCORE_MIN;
 //
-//			//Send distance and tote status to dashboard. The bounding rect, particularly the horizontal center (left - right) may be useful for rotating/driving towards a tote
-//			SmartDashboard.putBoolean("IsTote", isTote);
-//			SmartDashboard.putNumber("Distance", computeDistance(binaryFrame, particles.elementAt(0)));
 			ParticleReport bestParticle = particles.elementAt(0);
 		    NIVision.Rect particleRect = new NIVision.Rect((int)bestParticle.BoundingRectTop, (int)bestParticle.BoundingRectLeft, (int)bestParticle.BoundingRectHeight, (int)bestParticle.BoundingRectWidth);
 		    
@@ -237,41 +265,40 @@ public class Robot extends IterativeRobot {
 		    SmartDashboard.putNumber("Rect Top", bestParticle.BoundingRectTop);
 		    SmartDashboard.putNumber("Rect Left", bestParticle.BoundingRectLeft);
 		    SmartDashboard.putNumber("Rect Width", bestParticle.BoundingRectWidth);
-		    SmartDashboard.putNumber("Vertical Segments", bestParticle.VerticalSegments);
-		    SmartDashboard.putNumber("Horizontal Segments", bestParticle.HorizontalSegments);
+		    SmartDashboard.putNumber("Area by image area", bestParticle.AreaByImageArea);
+		    SmartDashboard.putNumber("Area", bestParticle.Area);
 		    double bestParticleMidpoint = bestParticle.BoundingRectLeft + bestParticle.BoundingRectWidth/2.0;
 		    double bestParticleMidpointAimingCoordnates = pixelCoordnateToAimingCoordnate(bestParticleMidpoint, CAMERA_RESOLUTION_X);
-		    SmartDashboard.putNumber("Angle to target", aimingCoordnateToAngle(bestParticleMidpointAimingCoordnates, VIEW_ANGLE));
+		    angleToTarget = aimingCoordnateToAngle(bestParticleMidpointAimingCoordnates, VIEW_ANGLE);
 		    
-		    //NIVision.imaqMergeOverlay(colorFrame, colorFrame, new NIVision.RGBValue[]{new NIVision.RGBValue(0,0,0,255)}, "a");
-		    //			NIVision.imaqOverlayText(
-//					colorFrame,
-//					new NIVision.Point(particleRect.left, particleRect.top), 
-//					particleRect.left + ", " + particleRect.top, 
-//					new NIVision.RGBValue(200, 255, 0, 0),
-//					new NIVision.OverlayTextOptions(
-//							"",
-//							10,
-//							0,
-//							0,
-//							0,
-//							0,
-//							NIVision.TextAlignment.LEFT,
-//							NIVision.VerticalTextAlignment.BOTTOM,
-//						    new NIVision.RGBValue(0, 0, 0, 255),
-//						    0
-//					),
-//					"rect"
-//					);
-		} 
-//		else {
-//			SmartDashboard.putBoolean("IsTote", false);
-//		}
+		}
+		else
+		{
+			angleToTarget = 0.0;
+		}
+
         if(cameraView.getSelected() == COLOR)
         {
         	CameraServer.getInstance().setImage(colorFrame);
         }
+	    SmartDashboard.putNumber("Angle to target", angleToTarget);
 
+        if(joystick.getRawButton(1))
+        {
+        	SmartDashboard.putBoolean("PIDDrive", true);
+        	pid.setPID(SmartDashboard.getNumber("P"), SmartDashboard.getNumber("I"), SmartDashboard.getNumber("D"));
+        	double setPoint = unwrapper.pidGet() - angleToTarget;
+        	SmartDashboard.putNumber("Set point", setPoint);
+        	pid.setSetpoint(setPoint);
+        	pid.enable();
+  
+        }
+        else
+        {
+        	SmartDashboard.putBoolean("PIDDrive", true);
+        	pid.disable();
+        	drive.arcadeDrive(-joystick.getRawAxis(1), -joystick.getRawAxis(0));
+        }
     }
     
     /**

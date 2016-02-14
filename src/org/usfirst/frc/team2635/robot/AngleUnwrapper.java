@@ -60,7 +60,7 @@ public class AngleUnwrapper implements PIDSource
 	public PIDSourceType getPIDSourceType()
 	{
 		// TODO Auto-generated method stub
-		return null;
+		return PIDSourceType.kDisplacement;
 	}
 
 

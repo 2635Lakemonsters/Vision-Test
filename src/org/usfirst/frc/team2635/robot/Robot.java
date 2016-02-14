@@ -8,6 +8,7 @@ import java.util.Vector;
 import org.usfirst.frc.team2635.robot.Robot.ParticleReport;
 
 import com.kauailabs.navx.frc.AHRS;
+import com.lakemonsters2635.sensor.modules.SensorDummy;
 import com.ni.vision.NIVision;
 import com.ni.vision.NIVision.ColorMode;
 import com.ni.vision.NIVision.DrawMode;
@@ -102,7 +103,7 @@ public class Robot extends IterativeRobot {
     AngleUnwrapper unwrapper;
     double angleToTarget = 0.0;
     public void robotInit() {
-    	SmartDashboard.putNumber("P", 0);
+    	SmartDashboard.putNumber("P", 1.0);
     	SmartDashboard.putNumber("I", 0);
     	SmartDashboard.putNumber("D", 0);
 		rearRight = new CANTalon(REAR_RIGHT_CHANNEL);
@@ -114,7 +115,8 @@ public class Robot extends IterativeRobot {
     	navx = new AHRS(SerialPort.Port.kMXP);
     	unwrapper = new AngleUnwrapper(180.0, new SensorNavxAngle(navx));
     	pid = new PIDController(SmartDashboard.getNumber("P"), SmartDashboard.getNumber("I"), SmartDashboard.getNumber("D"),unwrapper, new PIDOutputDrive(drive));
-	    overlayFrame = NIVision.imaqCreateImage(ImageType.IMAGE_U8, 0);
+    	
+    	overlayFrame = NIVision.imaqCreateImage(ImageType.IMAGE_U8, 0);
 	    
         colorFrame = NIVision.imaqCreateImage(NIVision.ImageType.IMAGE_RGB, 0);
         binaryFrame = NIVision.imaqCreateImage(ImageType.IMAGE_U8, 0);
@@ -123,7 +125,7 @@ public class Robot extends IterativeRobot {
         NIVision.IMAQdxConfigureGrab(session);
         NIVision.IMAQdxStartAcquisition(session);
 		criteria[0] = new NIVision.ParticleFilterCriteria2(NIVision.MeasurementType.MT_AREA_BY_IMAGE_AREA, AREA_MINIMUM, 100.0, 0, 0);
-
+		
         
 		SmartDashboard.putNumber("Retro hue min", RETRO_HUE_RANGE.minValue);
 		SmartDashboard.putNumber("Retro hue max", RETRO_HUE_RANGE.maxValue);
@@ -171,6 +173,37 @@ public class Robot extends IterativeRobot {
     	return aimingCoordnate * viewingAngle/2.0;
     }
     public void teleopPeriodic() {
+    	SmartDashboard.putNumber("Current angle", unwrapper.pidGet());
+    	SmartDashboard.putBoolean("A Button", joystick.getRawButton(1));
+    	
+    	if(joystick.getRawButton(1))
+        {
+        	SmartDashboard.putBoolean("PIDDrive", true);
+        	if(!pid.isEnabled())
+        	{
+            	double setPoint = unwrapper.pidGet() - angleToTarget;
+            	SmartDashboard.putNumber("Set point", -setPoint);
+            	pid.setSetpoint(-setPoint);
+            	pid.setPID(SmartDashboard.getNumber("P"), SmartDashboard.getNumber("I"), SmartDashboard.getNumber("D"));
+        		pid.enable();
+        	}
+
+  
+        }
+        else
+        {
+        	SmartDashboard.putBoolean("PIDDrive", false);
+        	if(pid.isEnabled())
+        	{
+        		pid.disable();
+        	}
+        	drive.arcadeDrive(-joystick.getRawAxis(1), -joystick.getRawAxis(0));
+        }
+    	vision();
+
+    }
+    public void vision()
+    {
     	//Grab a frame from the camera
         NIVision.IMAQdxGrab(session, colorFrame, 1);				
         RETRO_HUE_RANGE.minValue = (int)SmartDashboard.getNumber("Retro hue min", RETRO_HUE_RANGE.minValue);
@@ -189,6 +222,7 @@ public class Robot extends IterativeRobot {
 		//SCALE_RANGE.maxValue = (int)SmartDashboard.getNumber("Scale Range Max");
 		//MIN_MATCH_SCORE = (int)SmartDashboard.getNumber("Min Match Score");
         //Look at the color frame for colors that fit the range. Colors that fit the range will be transposed as a 1 to the binary frame.
+		
 		NIVision.imaqColorThreshold(binaryFrame, colorFrame, 255, ColorMode.HSV, RETRO_HUE_RANGE, RETRO_SAT_RANGE, RETRO_VAL_RANGE);
 		//Send the binary image to the cameraserver
 		if(cameraView.getSelected() == BINARY)
@@ -283,24 +317,7 @@ public class Robot extends IterativeRobot {
         }
 	    SmartDashboard.putNumber("Angle to target", angleToTarget);
 
-        if(joystick.getRawButton(1))
-        {
-        	SmartDashboard.putBoolean("PIDDrive", true);
-        	pid.setPID(SmartDashboard.getNumber("P"), SmartDashboard.getNumber("I"), SmartDashboard.getNumber("D"));
-        	double setPoint = unwrapper.pidGet() - angleToTarget;
-        	SmartDashboard.putNumber("Set point", setPoint);
-        	pid.setSetpoint(setPoint);
-        	pid.enable();
-  
-        }
-        else
-        {
-        	SmartDashboard.putBoolean("PIDDrive", true);
-        	pid.disable();
-        	drive.arcadeDrive(-joystick.getRawAxis(1), -joystick.getRawAxis(0));
-        }
     }
-    
     /**
      * This function is called periodically during test mode
      */
